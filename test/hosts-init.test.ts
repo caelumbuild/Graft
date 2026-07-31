@@ -108,7 +108,7 @@ test('runHostsInit registers MCP configs for selected hosts', () => {
   assert.equal(r.mcp.length, 1);
   assert.match(r.mcp[0].path, /\.cursor\/mcp\.json$/);
   const cfg = JSON.parse(readFileSync(join(repo, '.cursor', 'mcp.json'), 'utf8'));
-  assert.equal(cfg.mcpServers.graft.command, 'npx');
+  assert.deepEqual(cfg.mcpServers.graft, { command: 'caelum-graph', args: ['mcp'] });
 });
 
 test('mcp: false skips MCP registration', () => {
