@@ -163,7 +163,9 @@ test("a refresh leaves the statusline stats alone, so the Stop hook still fires"
   assert.equal(readStats(d), null);
 
   writeStats(d, { ...emptyStats(), dirty: true, staleCount: 3 });
-  writeFileSync(join(d, "src", "math.ts"), `${MATH}export const Y = 2;\n`);
+  // Change size as well as content so the default stat-fast probe is portable
+  // across filesystems whose mtime resolution cannot distinguish rapid writes.
+  writeFileSync(join(d, "src", "math.ts"), `${MATH}export const Y_LONGER = 2;\n`);
   const r = await ensureFreshGraph(d);
   assert.equal(r.refreshed, true, "the graph itself was rebuilt");
 
