@@ -1,24 +1,24 @@
 {
-  "name": "@nanonets/graft",
+  "name": "@caelumbuild/context-graph",
   "version": "0.8.2",
-  "description": "Build a repo's context graph as a folder of linked markdown files that live in the repo and stay in sync with the code through git.",
+  "description": "Caelum Build's deterministic, local-only repository context graph and blast-radius toolkit.",
   "keywords": [
-    "ai",
-    "agents",
+    "local-only",
+    "code-intelligence",
     "knowledge-graph",
     "context",
     "codebase",
-    "llm",
-    "graft"
+    "blast-radius",
+    "caelum-build"
   ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NanoNets/context-graph-engine.git"
+    "url": "git+https://github.com/caelumbuild/Graft.git"
   },
-  "homepage": "https://github.com/NanoNets/context-graph-engine#readme",
+  "homepage": "https://github.com/caelumbuild/Graft#readme",
   "bugs": {
-    "url": "https://github.com/NanoNets/context-graph-engine/issues"
+    "url": "https://github.com/caelumbuild/Graft/issues"
   },
   "publishConfig": {
     "access": "public"
@@ -34,7 +34,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "graft": "dist/cli.js"
+    "caelum-graph": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -48,8 +48,7 @@
     "cli": "tsx src/cli.ts",
     "test": "node --import tsx --test test/*.test.ts",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run build",
-    "postinstall": "node scripts/postinstall.mjs"
+    "prepublishOnly": "npm run build"
   },
   "engines": {
     "node": ">=20"
