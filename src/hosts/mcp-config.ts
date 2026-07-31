@@ -8,7 +8,6 @@
  * `registerMcpConfigs()` walks that same list to do the writing.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { PlannedWrite } from './plan.js';
@@ -28,43 +27,14 @@ export interface McpTarget extends PlannedWrite {
   entry?: object;
 }
 
-/**
- * How to launch the MCP server, decided once at init time.
- *
- * `npx -y` resolves the package before it can serve: measured at a 211 ms
- * spawn→`initialize` handshake against 80 ms for the installed binary, five runs
- * each. The harness registers a server's tools only once that handshake lands, and
- * a slow one can miss the first request entirely — in a traced session graft's
- * tools arrived 13.9 s in, four model turns too late to shape the approach. (That
- * 13.9 s is NOT explained by 130 ms; the gap's cause is still unknown. This is the
- * cheap half of the fix, not the whole of it.)
- *
- * Deliberately a bare command name, never an absolute path: these files get
- * committed and shared, and this repo already carries the scar of the alternative —
- * a checked-in hook shim with another machine's home directory baked into it. A
- * bare `graft` works on any machine that has it installed; `npx` remains the
- * fallback for machines that don't.
- */
-const NPX_LAUNCH = { command: 'npx', args: ['-y', '@nanonets/graft', 'mcp'] };
-const BIN_LAUNCH = { command: 'graft', args: ['mcp'] };
+/** Launch only the locally installed Caelum binary. No package resolution or
+ * download fallback is permitted from generated host configuration. */
+const BIN_LAUNCH = { command: 'caelum-graph', args: ['mcp'] };
 
-function graftOnPath(): boolean {
-  const r = spawnSync('graft', ['--version'], { stdio: 'ignore', timeout: 5000 });
-  return r.status === 0;
-}
-
-/**
- * JSON hosts: `{ command, args }`.
- *
- * `GRAFT_MCP_NPX=1` forces the `npx` form — the escape hatch for a machine whose
- * global install is stale or shadowed, and what the tests set so their expectations
- * don't depend on whether the machine running them happens to have graft installed.
- * `opts.onPath` is the same override for direct unit tests of both branches.
- */
+/** JSON hosts: `{ command, args }`. The option remains for API compatibility. */
 export function serverEntry(opts: { onPath?: boolean } = {}): { command: string; args: string[] } {
-  const forced = process.env.GRAFT_MCP_NPX;
-  if (forced !== undefined && forced !== '' && forced !== '0' && forced !== 'false') return NPX_LAUNCH;
-  return (opts.onPath ?? graftOnPath()) ? BIN_LAUNCH : NPX_LAUNCH;
+  void opts;
+  return BIN_LAUNCH;
 }
 
 
