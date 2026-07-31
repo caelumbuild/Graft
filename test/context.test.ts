@@ -188,7 +188,7 @@ test("human notes below the generated block survive regeneration", async () => {
 // wiring-graph layer (checkGraph). A keyless `graft build` (no --deep) only ever produces
 // the wiring layer — manifest.json (markdown layer) is never written — so `check` must not
 // treat that absence as failure on its own.
-test("graft check: keyless build (no --deep) exits 0 — wiring graph present, markdown layer never built", () => {
+test("caelum check exits 0 when wiring graph is present and concept layer is disabled", () => {
   const dir = mkdtempSync(join(tmpdir(), "ctxgraph-cli-"));
   try {
     writeFileSync(join(dir, "math.ts"), "export function add(a: number, b: number): number {\n  return a + b;\n}\n");
@@ -197,7 +197,7 @@ test("graft check: keyless build (no --deep) exits 0 — wiring graph present, m
 
     const r = runCli(["check", dir]);
     assert.equal(r.status, 0, `expected exit 0, got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
-    assert.match(r.stdout, /deep layer: not built/);
+    assert.match(r.stdout, /concept layer: disabled/);
     assert.match(r.stdout, /wiring graph is the source of truth/);
     assert.match(r.stdout, /graph check: OK/);
   } finally {

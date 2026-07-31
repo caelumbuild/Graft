@@ -4,13 +4,11 @@
  * map, init. Git is the sync: commit graft/ and a clone has the graph. A
  * workspace parent (≥2 git children) federates query commands across children.
  */
-import "dotenv/config";
 import { Command } from "commander";
 import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Graft } from "./engine.js";
-import { resolveConfig, type EngineConfig } from "./ai/providers.js";
-import type { ProviderKind } from "./ai/llm/factory.js";
+import type { EngineConfig } from "./ai/providers.js";
 import { formatCheckReport } from "./context/check.js";
 import { formatGraphCheckReport } from "./graph/check.js";
 import { buildGraphIfMissing, runInit } from "./claude/init.js";
@@ -32,27 +30,19 @@ import { formatInitEpilogue } from "./cli-epilogue.js";
 import { planInit, selectedWrites } from "./hosts/plan.js";
 import { formatNonInteractiveHelp, formatPlan, runPicker } from "./cli-picker.js";
 import { homedir } from "node:os";
-import { formatUpgradeReport, formatVersionReport, getNpmViewVersion, readCurrentVersion, runUpgrade } from "./cli-meta.js";
+import { readCurrentVersion } from "./cli-meta.js";
 
 const program = new Command();
 const currentVersion = readCurrentVersion(import.meta.url);
 
 program
-  .name("graft")
-  .description("Build a repo's context graph as linked markdown, and keep it in sync with the code.")
+  .name("caelum-graph")
+  .description("Build and query a deterministic local-only repository context graph.")
   .version(currentVersion, "-v, --version")
-  .option("--dir <path>", "context graph directory (default: <repo>/graft)")
-  .option("--provider <name>", "LLM wire format: openai | anthropic (env GRAFT_PROVIDER)")
-  .option("--model <id>", "model id for the LLM pass (env GRAFT_MODEL)")
-  .option("--api-key <key>", "provider API key (env GRAFT_API_KEY)")
-  .option("--base-url <url>", "OpenAI-compatible endpoint URL (env GRAFT_BASE_URL)");
+  .option("--dir <path>", "context graph directory (default: <repo>/graft)");
 
 interface GlobalOpts {
   dir?: string;
-  provider?: string;
-  model?: string;
-  apiKey?: string;
-  baseUrl?: string;
 }
 
 /** Config drawn from the global CLI flags (env + defaults fill the rest). */
@@ -60,10 +50,6 @@ function cliConfig(): EngineConfig {
   const o = program.opts<GlobalOpts>();
   return {
     contextDir: o.dir,
-    provider: o.provider as ProviderKind | undefined,
-    model: o.model,
-    apiKey: o.apiKey,
-    baseUrl: o.baseUrl,
   };
 }
 
@@ -92,39 +78,12 @@ async function refreshBefore(dir: string, opts: { refresh?: boolean }): Promise<
 const NO_REFRESH_FLAG = ["--no-refresh", "skip the freshness check — answer from the graph as-is"] as const;
 
 program
-  .command("version")
-  .description("Print the installed version and the latest published on npm")
-  .action(() => {
-    const latest = getNpmViewVersion();
-    console.log(formatVersionReport(currentVersion, latest));
-  });
-
-program
-  .command("upgrade")
-  .description("Upgrade the globally installed graft to the latest version on npm")
-  .action(() => {
-    const result = runUpgrade(import.meta.url);
-    console.log(formatUpgradeReport(result));
-    if (result.ran && !result.ok) process.exit(1);
-  });
-
-program
   .command("build")
-  .description(
-    "Build graft/ from your code — wiring graph + per-file cards ($0, no key). " +
-      "Add --deep for the LLM concept map + per-symbol summaries/crux.",
-  )
+  .description("Build the local wiring graph and per-file API cards. Never uses the network.")
   .argument("[dir]", "repository root", ".")
-  .option("--deep", "run the LLM pass: concept nodes (graft/*.md) + per-symbol summary/crux")
   .option("-e, --extensions <exts...>", 'code extensions to include (e.g. ".ts" ".py")')
-  .option("-j, --concurrency <n>", "files summarized in parallel during --deep (default 5)")
   .option("--no-reuse", "re-parse every file instead of replaying unchanged ones from the extraction cache")
-  .action(async (dir: string, opts: { deep?: boolean; extensions?: string[]; concurrency?: string; reuse?: boolean }) => {
-    const concurrency = opts.concurrency ? Math.max(1, Number(opts.concurrency)) : undefined;
-    if (opts.concurrency && !Number.isFinite(concurrency)) {
-      console.error(`✗ --concurrency must be a number, got "${opts.concurrency}"`);
-      process.exit(1);
-    }
+  .action(async (dir: string, opts: { extensions?: string[]; reuse?: boolean }) => {
     const engine = engineFrom();
     const fmt = (o: Record<string, number>) =>
       Object.entries(o)
@@ -132,70 +91,30 @@ program
         .map(([k, n]) => `${n} ${k}`)
         .join(", ");
 
-    // --deep needs a key; without one, degrade to the $0 structural build.
-    let deep = opts.deep;
-    const resolved = resolveConfig(cliConfig());
-    if (deep && !resolved.apiKey) {
-      deep = false;
-      console.error(
-        "⚠ no API key set — falling back to the structural build (no LLM summaries).\n" +
-          "  Set GRAFT_API_KEY (and GRAFT_PROVIDER / GRAFT_BASE_URL / GRAFT_MODEL for your\n" +
-          "  provider) and re-run `graft build --deep` to add concept nodes and summaries.",
-      );
-    }
-    if (deep && resolved.usedLegacyEnv) {
-      console.error(
-        "⚠ using OPENROUTER_API_KEY (deprecated) — prefer GRAFT_API_KEY + GRAFT_BASE_URL.",
-      );
-    }
-
     // Workspace parent: build each child into its OWN graft/ + a workspace index.
     const buildRoot = resolve(dir);
     const buildGlobalDir = program.opts<GlobalOpts>().dir;
     if (isWorkspaceBuildRoot(buildRoot, buildGlobalDir)) {
       await runWorkspaceBuild(buildRoot, {
-        deep: !!deep,
+        deep: false,
         extensions: opts.extensions,
-        concurrency,
         childConfig: cliConfig(),
         override: buildGlobalDir,
       });
       return;
     }
 
-    // --deep: concept nodes first, then the wiring graph links cards up to them.
-    if (deep) {
-      const c = await engine.init(dir, {
-        extensions: opts.extensions,
-        onProgress: ({ phase, index, total, file }) =>
-          process.stderr.write(
-            `\r${phase === "summarize" ? "reading" : "writing"} concepts ${index + 1}/${total}: ${file.slice(0, 40).padEnd(40)}`,
-          ),
-      });
-      process.stderr.write("\n");
-      console.log(
-        `✓ concepts: ${c.nodes} nodes, ${c.links} links from ${c.files} files (${c.summarized} read, ${c.cached} cached)`,
-      );
-      for (const e of c.errors) console.error(`✗ ${e}`);
-    }
-
-    // Wiring graph — always; LLM meaning only with --deep.
+    // Deterministic wiring graph only.
     const g = await engine.graph(dir, {
-      llm: deep,
-      concurrency,
       reuse: opts.reuse,
       onProgress: ({ phase, index, total, file }) =>
         process.stderr.write(
-          `\r${phase === "enrich" ? "summarizing" : "parsing"} ${index + 1}/${total}: ${file.slice(0, 50).padEnd(50)}`,
+          `\rparsing ${index + 1}/${total}: ${file.slice(0, 50).padEnd(50)}`,
         ),
     });
     process.stderr.write("\n");
     console.log(`✓ wiring: ${g.nodes} nodes (${fmt(g.byKind)}), ${g.edges} edges, ${g.cards} cards [${g.languages.join(", ")}]`);
     console.log(`  parsed: ${g.parsed} of ${g.files} files (${g.reused} replayed from cache)`);
-    if (deep) {
-      const m = g.meaning;
-      console.log(`  meaning: ${m.computed} computed, ${m.cached} cached, ${m.stale} stale, ${m.pending} pending`);
-    }
     console.log(`  → ${g.contextDir}`);
     for (const e of g.errors) console.error(`✗ ${e}`);
 
@@ -285,7 +204,7 @@ program
     } else {
       if (r.missing) {
         console.log(
-          "deep layer: not built (run `graft build --deep` for concept nodes) — wiring graph is the source of truth",
+          "concept layer: disabled in the Caelum local-only edition — wiring graph is the source of truth",
         );
       } else {
         console.log(formatCheckReport(r));
@@ -314,7 +233,7 @@ program
     const globalOpts = program.opts<{ dir?: string }>();
     const contextDir = contextDirFor(root, globalOpts.dir);
     if (!existsSync(contextDir)) {
-      console.error(`✗ no context graph at ${contextDir} — run \`graft build --deep\` first`);
+      console.error(`✗ no context graph at ${contextDir} — run \`caelum-graph build\` first`);
       process.exit(1);
     }
     const viewerDir = fileURLToPath(new URL("./viewer/", import.meta.url)); // prebuilt
